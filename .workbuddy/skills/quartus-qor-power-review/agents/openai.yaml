@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quartus QoR Power Review"
+  short_description: "Review resource, flow, DRC, and power reports"
+  default_prompt: "Use $quartus-qor-power-review to summarize resource usage, DRC status, and power."

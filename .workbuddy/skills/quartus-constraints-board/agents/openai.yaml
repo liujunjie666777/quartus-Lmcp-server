@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quartus Constraints Board"
+  short_description: "Manage QSF, SDC, pins, and board setup"
+  default_prompt: "Use $quartus-constraints-board to set up pins, clocks, and project constraints."

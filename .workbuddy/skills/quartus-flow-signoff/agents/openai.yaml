@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quartus Flow Signoff"
+  short_description: "Run end-to-end compile, sim, timing, and archive gates"
+  default_prompt: "Use $quartus-flow-signoff to run a full FPGA signoff checklist."

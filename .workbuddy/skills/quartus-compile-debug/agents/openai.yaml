@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quartus Compile Debug"
+  short_description: "Triage Quartus compile errors and reports"
+  default_prompt: "Use $quartus-compile-debug to diagnose and fix Quartus compilation failures."

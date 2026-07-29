@@ -1,0 +1,4 @@
+interface:
+  display_name: "Intel IP Co-Simulation"
+  short_description: "Run ModelSim with Intel IP simulation libraries"
+  default_prompt: "Use $intel-ip-cosimulation to simulate a design that uses Intel IP or LPM blocks."

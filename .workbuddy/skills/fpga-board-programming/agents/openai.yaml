@@ -1,0 +1,4 @@
+interface:
+  display_name: "FPGA Board Programming"
+  short_description: "Check JTAG cables and program FPGA images"
+  default_prompt: "Use $fpga-board-programming to detect cables and program the generated SOF."
