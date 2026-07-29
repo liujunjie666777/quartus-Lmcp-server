@@ -42,7 +42,8 @@ log = logging.getLogger("quartus-Lmcp")
 # Configuration / Quartus discovery
 # ---------------------------------------------------------------------------
 
-_EXE_SUFFIX = ".exe"
+_IS_WINDOWS = sys.platform == "win32"
+_EXE_SUFFIX = ".exe" if _IS_WINDOWS else ""
 
 EXECUTABLE_NAMES = {
     "quartus_sh": "quartus_sh.exe",
@@ -104,7 +105,7 @@ def _discovery_search_roots() -> list[Path]:
     """Return all candidate base directories for Quartus installation discovery."""
     bases: list[Path] = []
     # Scan common drives on Windows
-    for drive in ("C:/", "D:/", "E:/", "F:/"):
+    for drive in ("C:/", "D:/", "E:/", "F:/", "G:/", "H:/"):
         for folder in ("intelFPGA_lite", "intelFPGA", "altera"):
             p = Path(f"{drive}{folder}")
             bases.append(p)
@@ -125,6 +126,8 @@ def _discovery_search_roots() -> list[Path]:
         Path("/mnt/d/intelFPGA_lite"),
         Path("/mnt/d/intelFPGA"),
         Path("/mnt/e/intelFPGA_lite"),
+        Path("/mnt/g/intelFPGA_lite"),
+        Path("/mnt/h/intelFPGA_lite"),
     ):
         bases.append(base)
         if base.exists():
@@ -230,14 +233,14 @@ def _candidate_modelsim_bins() -> list[Path]:
             bins.append(Path(value))
 
     # Scan modeltech* directories across common drives
-    for drive in ("C:/", "D:/", "E:/", "F:/"):
+    for drive in ("C:/", "D:/", "E:/", "F:/", "G:/", "H:/"):
         for root in sorted(Path(drive).glob("modeltech*"), key=_version_key, reverse=True):
             bins.append(root / "win64")
             bins.append(root / "win32")
             bins.append(root / "win32aloem")
 
     # Scan bundled modelsim_ase inside Intel installations on all drives
-    for drive in ("C:/", "D:/", "E:/", "F:/"):
+    for drive in ("C:/", "D:/", "E:/", "F:/", "G:/", "H:/"):
         for base in (Path(f"{drive}intelFPGA_lite"), Path(f"{drive}intelFPGA")):
             if not base.exists():
                 continue
@@ -337,9 +340,10 @@ SIM_VLOG = MODELSIM.get("tools", {}).get("vlog", "")
 SIM_VCOM = MODELSIM.get("tools", {}).get("vcom", "")
 SIM_VSIM = MODELSIM.get("tools", {}).get("vsim", "")
 
+_DEFAULT_DOCS_DIR = Path.home() / "Documents" / "quartus_mcp_projects" if _IS_WINDOWS else Path.home() / "quartus_mcp_projects"
 DEFAULT_PROJECT_DIR = os.environ.get(
     "QUARTUS_MCP_PROJECT_DIR",
-    str(Path.home() / "Documents" / "quartus_mcp_projects"),
+    str(_DEFAULT_DOCS_DIR),
 )
 
 QUARTUS_ENV: dict = {**os.environ}
@@ -787,10 +791,15 @@ def _compile_intel_sim_libraries(sim_dir: Path, family: str, log_parts: list[str
         lib_dir = sim_dir / lib_name
         r = run_quartus([SIM_VLIB, str(lib_dir)], cwd=str(sim_dir), timeout=120)
         log_parts.append(f"\n$ vlib {lib_name}\n{r['stdout']}{r['stderr']}")
-        if not r["success"] and "already exists" not in (r["stdout"] + r["stderr"]).lower():
+        already_exists = "already exists" in (r["stdout"] + r["stderr"]).lower()
+        if not r["success"] and not already_exists:
+            log_parts.append(f"ERROR: vlib failed for {lib_name}: {r['stderr']}")
             continue
         r = run_quartus([SIM_VMAP, lib_name, str(lib_dir)], cwd=str(sim_dir), timeout=120)
         log_parts.append(f"\n$ vmap {lib_name} {lib_dir}\n{r['stdout']}{r['stderr']}")
+        if not r["success"]:
+            log_parts.append(f"ERROR: vmap failed for {lib_name}: {r['stderr']}")
+            continue
         compile_cmd = [SIM_VLOG]
         if kind == "systemverilog":
             compile_cmd.append("-sv")
@@ -799,6 +808,8 @@ def _compile_intel_sim_libraries(sim_dir: Path, family: str, log_parts: list[str
         log_parts.append(f"\n$ {' '.join(compile_cmd)}\n{r['stdout']}{r['stderr']}")
         if r["success"]:
             library_names.append(lib_name)
+        else:
+            log_parts.append(f"ERROR: vlog compile failed for {lib_name}: {r['stderr']}")
     return library_names
 
 
@@ -944,8 +955,8 @@ def get_quartus_installation() -> str:
         "default_project_dir": DEFAULT_PROJECT_DIR,
         "checked": QUARTUS.get("checked", []),
         "error": QUARTUS.get("error", ""),
-        "all_installations_count": len(_ALL_INSTALLATIONS) if "_ALL_INSTALLATIONS" in dir() else 0,
-        "current_install_index": _CURRENT_INSTALL_INDEX if "_CURRENT_INSTALL_INDEX" in dir() else 0,
+        "all_installations_count": len(_ALL_INSTALLATIONS),
+        "current_install_index": _CURRENT_INSTALL_INDEX,
     })
 
 
@@ -1193,8 +1204,12 @@ def list_projects(directory: str) -> str:
 
 @mcp.tool()
 def close_project() -> str:
-    """Close the current project. (Informational — server is stateless; each tool call manages its own session.)"""
-    return j({"note": "Server is stateless. Each tool call opens and closes its own project session."})
+    """Informational tool — this MCP server is stateless.
+    
+    Every tool call independently opens the project, performs its operation,
+    and closes the project. There is no persistent session to close.
+    """
+    return j({"note": "Server is stateless — every tool call independently opens, operates, and closes its own project session. No persistent session exists to close."})
 
 
 @mcp.tool()
@@ -2158,15 +2173,15 @@ def generate_sdc_constraints(project_path: str, clock_freq_mhz: float = 50.0) ->
         if a["name"] == "FAMILY":
             family = a["value"]
 
-    # Find clock pins from assignments
+    # Find clock pins from assignments using parse_qsf_pins()
+    pin_assignments = parse_qsf_pins(qsf_path)
     clock_pins = {}
-    for a in pars:
-        if a["name"] == "set_location_assignment":
-            port = a["to"]
-            pin = a["value"]
-            port_lower = port.lower()
-            if any(kw in port_lower for kw in ("clk", "clock", "clkin", "clk_in", "osc")):
-                clock_pins[port] = {"pin": pin, "freq_mhz": clock_freq_mhz}
+    for a in pin_assignments:
+        port = a["signal"]
+        pin = a["location"]
+        port_lower = port.lower()
+        if any(kw in port_lower for kw in ("clk", "clock", "clkin", "clk_in", "osc")):
+            clock_pins[port] = {"pin": pin, "freq_mhz": clock_freq_mhz}
 
     if not clock_pins:
         # Fallback: if no clock pins assigned, generate default single-clock
@@ -2221,8 +2236,8 @@ def generate_sdc_constraints(project_path: str, clock_freq_mhz: float = 50.0) ->
 
     # False paths on reset
     has_reset = any(
-        a["to"].lower() in ("rst", "rst_n", "reset", "reset_n", "nrst")
-        for a in pars if a["name"] == "set_location_assignment"
+        a["signal"].lower() in ("rst", "rst_n", "reset", "reset_n", "nrst")
+        for a in pin_assignments
     )
     if has_reset:
         sdc_lines.append("# Disable timing on asynchronous reset")
@@ -2591,6 +2606,89 @@ def list_available_ip(device_family: str = "") -> str:
     })
 
 
+def _use_ip_catalog() -> bool:
+    """Return True if the detected Quartus version is 15.1+ (IP Catalog replaces MegaWizard)."""
+    major, _ = _parse_quartus_version()
+    return major >= 15
+
+
+def _gen_megawizard_or_ip_tcl(
+    proj_dir: str,
+    revision: str,
+    name: str,
+    ip_type: str,
+    params_block: str,
+    success_tag: str,
+) -> str:
+    """Generate a version-adaptive Tcl script for IP generation.
+
+    For Quartus < 15.1: uses MegaWizard (get_megawizard_plugins / create_megawizard).
+    For Quartus >= 15.1: uses IP Catalog (::quartus::ipgenerate / create_ip).
+    The generated Tcl auto-detects which API is available at runtime.
+    """
+    megawiz_tcl = textwrap.dedent(f"""\
+        set megawiz [lindex [get_megawizard_plugins] 0]
+        create_megawizard -name {name} -format VERILOG \\
+            -type {ip_type} \\
+            -params {{
+{params_block}
+            }} \\
+            -directory {{{proj_dir}/{name}}}
+    """)
+
+    ip_catalog_tcl = textwrap.dedent(f"""\
+        package require ::quartus::ipgenerate
+        create_ip -name {name} -type {ip_type} -directory {{{proj_dir}/{name}}}
+        set_ip_parameter -name {name} -param_string {{
+{params_block}
+        }}
+        generate_ip -name {name}
+    """)
+
+    # Version-adaptive: try IP Catalog first on 15.1+, else MegaWizard
+    major, _ = _parse_quartus_version()
+    if major >= 15:
+        # IP Catalog path with MegaWizard fallback
+        tcl_body = textwrap.dedent(f"""\
+            if {{[catch {{
+                package require ::quartus::ipgenerate
+                create_ip -name {name} -type {ip_type} -directory {{{proj_dir}/{name}}}
+                set_ip_parameter -name {name} -param_string {{
+{params_block}
+                }}
+                generate_ip -name {name}
+                puts "{success_tag}"
+            }} err]}} {{
+                # Fallback: try MegaWizard
+                if {{![catch {{set _tmp [get_megawizard_plugins]}}]}} {{
+                    {megawiz_tcl}
+                    puts "{success_tag}"
+                }} else {{
+                    puts "IP_ERROR: $err"
+                }}
+            }}
+        """)
+    else:
+        # MegaWizard path
+        tcl_body = textwrap.dedent(f"""\
+            if {{[catch {{
+                {megawiz_tcl}
+                puts "{success_tag}"
+            }} err]}} {{
+                puts "IP_ERROR: $err"
+            }}
+        """)
+
+    return textwrap.dedent(f"""\
+        package require ::quartus::project
+        project_open -revision {{{revision}}} {{{proj_dir}/{revision}.qpf}}
+        {tcl_body}
+        set_global_assignment -name QIP_FILE {{{proj_dir}/{name}/{name}.qip}}
+        export_assignments
+        project_close
+    """)
+
+
 @mcp.tool()
 def create_pll_ip(
     project_path: str,
@@ -2600,7 +2698,7 @@ def create_pll_ip(
     output_phases: str = "",
     output_duty_cycles: str = "",
 ) -> str:
-    """Generate an ALTPLL IP core using MegaWizard Plug-In Manager.
+    """Generate an ALTPLL IP core (MegaWizard for Quartus < 15.1, IP Catalog for 15.1+).
 
     Args:
         project_path: Path to .qpf file or project directory
@@ -2628,36 +2726,19 @@ def create_pll_ip(
     if multiply_factor < 1:
         multiply_factor = 1
 
-    tcl = textwrap.dedent(f"""\
-        package require ::quartus::project
-        project_open -revision {{{revision}}} {{{proj_dir}/{revision}.qpf}}
-
-        set pll_path {{{proj_dir}/{name}}}
-        set pll_qip [file join $pll_path {name}.qip]
-
-        if {{[catch {{
-            set megawiz [lindex [get_megawizard_plugins] 0]
-            create_megawizard -name {name} -format VERILOG \\
-                -type ALTPLL \\
-                -params {{
+    params_block = textwrap.dedent(f"""\
                     operation_mode "normal"
                     input_frequency {input_freq_mhz}
                     multiply_by {multiply_factor}
                     output_clock_frequency {{"{' '.join(str(f) for f in freq_list)}"}}
                     phase_shift {{"{' '.join(str(p) for p in phase_list)}"}}
                     duty_cycle {{"{' '.join(str(d) for d in duty_list)}"}}
-                }} \\
-                -directory {{{proj_dir}/{name}}}
-
-            set_global_assignment -name QIP_FILE {{{proj_dir}/{name}/{name}.qip}}
-            export_assignments
-            puts "PLL_CREATED:{name}"
-        }} err]}} {{
-            puts "PLL_ERROR: $err"
-        }}
-
-        project_close
     """)
+
+    tcl = _gen_megawizard_or_ip_tcl(
+        proj_dir, revision, name, "ALTPLL",
+        params_block, f"PLL_CREATED:{name}",
+    )
     r = run_tcl(tcl, cwd=proj_dir, timeout=120)
 
     return j({
@@ -2681,6 +2762,8 @@ def create_ram_ip(
 ) -> str:
     """Generate an on-chip RAM/ROM IP core (ALTSYNCRAM/altsyncram).
 
+    Uses MegaWizard for Quartus < 15.1, IP Catalog for 15.1+.
+
     Args:
         project_path: Path to .qpf file or project directory
         name: RAM instance name (e.g. 'ram_buffer')
@@ -2695,30 +2778,17 @@ def create_ram_ip(
 
     ram_mode = "SINGLE_PORT" if ram_type == "single_port" else ("DUAL_PORT" if ram_type == "dual_port" else "ROM")
 
-    tcl = textwrap.dedent(f"""\
-        package require ::quartus::project
-        project_open -revision {{{revision}}} {{{proj_dir}/{revision}.qpf}}
-
-        if {{[catch {{
-            create_megawizard -name {name} -format VERILOG \\
-                -type ALTSYNCRAM \\
-                -params {{
+    params_block = textwrap.dedent(f"""\
                     operation_mode "{ram_mode}"
                     width_a {width}
                     widthad_a [expr int(ceil(log({depth})/log(2)))]
                     numwords_a {depth}
-                }} \\
-                -directory {{{proj_dir}/{name}}}
-
-            set_global_assignment -name QIP_FILE {{{proj_dir}/{name}/{name}.qip}}
-            export_assignments
-            puts "RAM_CREATED:{name}"
-        }} err]}} {{
-            puts "RAM_ERROR: $err"
-        }}
-
-        project_close
     """)
+
+    tcl = _gen_megawizard_or_ip_tcl(
+        proj_dir, revision, name, "ALTSYNCRAM",
+        params_block, f"RAM_CREATED:{name}",
+    )
     r = run_tcl(tcl, cwd=proj_dir, timeout=120)
 
     return j({
@@ -2743,6 +2813,8 @@ def create_fifo_ip(
 ) -> str:
     """Generate a FIFO IP core (SCFIFO/DCFIFO).
 
+    Uses MegaWizard for Quartus < 15.1, IP Catalog for 15.1+.
+
     Args:
         project_path: Path to .qpf file or project directory
         name: FIFO instance name (e.g. 'fifo_data')
@@ -2755,28 +2827,15 @@ def create_fifo_ip(
     except ValueError as e:
         return j({"error": str(e)})
 
-    tcl = textwrap.dedent(f"""\
-        package require ::quartus::project
-        project_open -revision {{{revision}}} {{{proj_dir}/{revision}.qpf}}
-
-        if {{[catch {{
-            create_megawizard -name {name} -format VERILOG \\
-                -type {fifo_type} \\
-                -params {{
+    params_block = textwrap.dedent(f"""\
                     width {width}
                     depth {depth}
-                }} \\
-                -directory {{{proj_dir}/{name}}}
-
-            set_global_assignment -name QIP_FILE {{{proj_dir}/{name}/{name}.qip}}
-            export_assignments
-            puts "FIFO_CREATED:{name}"
-        }} err]}} {{
-            puts "FIFO_ERROR: $err"
-        }}
-
-        project_close
     """)
+
+    tcl = _gen_megawizard_or_ip_tcl(
+        proj_dir, revision, name, fifo_type,
+        params_block, f"FIFO_CREATED:{name}",
+    )
     r = run_tcl(tcl, cwd=proj_dir, timeout=120)
 
     return j({
@@ -3475,7 +3534,7 @@ def run_seed_sweep(
             execute_flow -compile
             project_close
             """)
-        r = run_tcl(tcl_code, cwd=proj_dir, timeout=timeout // len(seed_list))
+        r = run_tcl(tcl_code, cwd=proj_dir, timeout=max(timeout // len(seed_list), 300))
 
         # Quick parse STA report
         fmax = None
@@ -3781,35 +3840,90 @@ def get_clock_domain_crossings(
 
     qsf_text = Path(qsf_path).read_text(errors="replace")
 
-    # Find all clock assignments
+    # Find all clock-related pin assignments from QSF
     clocks = set()
-    for m in re.finditer(r'set_location_assignment.*?-to\s+(\S+)', qsf_text):
-        pass  # pin assignments, not clocks
+    pin_assignments = parse_qsf_pins(qsf_path)
+    for a in pin_assignments:
+        port_lower = a["signal"].lower()
+        if any(kw in port_lower for kw in ("clk", "clock", "clkin", "clk_in", "osc")):
+            clocks.add(a["signal"])
 
-    # Find SDC-style clock constraints if stored in QSF as global assignments
-    for m in re.finditer(r'set_global_assignment.*?CLOCK.*?(\S+)', qsf_text, re.IGNORECASE):
-        clocks.add(m.group(1))
+    # Also find clocks from QSF global assignments (CLOCK-related)
+    for line in qsf_text.splitlines():
+        m = re.match(r'set_global_assignment\s+-name\s+CLOCK_SETTINGS\s+(\S+)', line)
+        if m:
+            clocks.add(m.group(1))
 
-    # Read STA report for clock sections
-    sta_files = list((Path(proj_dir) / "output_files").glob("*.sta.rpt"))
+    # Find SDC files and extract create_clock definitions
+    for sdc_file in sorted(Path(proj_dir).glob("*.sdc")):
+        try:
+            sdc_text = sdc_file.read_text(errors="replace")
+            for m in re.finditer(r'create_clock\s+.*?-name\s+(\S+)\s+', sdc_text):
+                clocks.add(m.group(1))
+            # Also catch unnamed clocks
+            for m in re.finditer(r'create_clock\s+.*?\[get_ports\s+\{(\S+)\}\]', sdc_text):
+                clocks.add(m.group(1))
+        except OSError:
+            pass
+
+    # Read STA report for cross-clock-domain timing paths
     cross_domains = []
+    sta_files = sorted((Path(proj_dir) / "output_files").glob("*.sta.rpt"),
+                       key=lambda f: f.stat().st_mtime, reverse=True)
     if sta_files:
         txt = sta_files[0].read_text(errors="replace")
-        # Look for clock transfer information
-        for m in re.finditer(r"from clock[^.]+\.\.\.(\S+)[^t]+to clock[^.]+\.\.\.(\S+)",
+
+        # Parse STA timing summary section for clock-to-clock entries
+        # Typical format: "; Clock Transfer: from_clock to to_clock"
+        for m in re.finditer(r'Clock Transfer\s*[;:]\s*(\S+)\s+to\s+(\S+)',
                             txt, re.IGNORECASE):
-            src_clk = m.group(1).strip('{}')
-            dst_clk = m.group(2).strip('{}')
-            if src_clk != dst_clk:
+            src_clk = m.group(1).strip('{}"')
+            dst_clk = m.group(2).strip('{}"')
+            if src_clk != dst_clk and src_clk and dst_clk:
                 cross_domains.append({"from": src_clk, "to": dst_clk})
+
+        # Also parse per-path clock info in STA reports
+        if not cross_domains:
+            # Parse "From Clock:" / "To Clock:" lines in detailed timing paths
+            path_clocks = {}
+            for m in re.finditer(r'(?:From|Launch)\s+Clock\s*[;:]\s*(\S+)', txt, re.IGNORECASE):
+                src = m.group(1).strip('{}"')
+                # Find the corresponding destination clock nearby
+                # Look for "To Clock:" or "Latch Clock:" after this match
+                rest = txt[m.end():m.end()+500]
+                dm = re.search(r'(?:To|Latch)\s+Clock\s*[;:]\s*(\S+)', rest, re.IGNORECASE)
+                if dm:
+                    dst = dm.group(1).strip('{}"')
+                    if src != dst and src and dst:
+                        key = f"{src}->{dst}"
+                        if key not in path_clocks:
+                            path_clocks[key] = {"from": src, "to": dst}
+                            cross_domains.append({"from": src, "to": dst})
+
+        # Deduplicate
+        seen = set()
+        unique_crossings = []
+        for cd in cross_domains:
+            key = f"{cd['from']}->{cd['to']}"
+            if key not in seen:
+                seen.add(key)
+                unique_crossings.append(cd)
+        cross_domains = unique_crossings
 
     return j({
         "clocks_found": sorted(list(clocks)),
+        "clock_count": len(clocks),
         "cross_domain_paths": len(cross_domains),
-        "samples": cross_domains[:10],
-        "recommendation": ("CDC paths need synchronization (2-FF synchronizer, "
-                          "async FIFO, or handshake). Add false_path on "
-                          "unsynchronized crossings.") if cross_domains else "No CDC issues detected.",
+        "samples": cross_domains[:20],
+        "recommendation": (
+            "CDC paths found — add synchronization (2-FF synchronizer, "
+            "async FIFO, or handshake). Add set_false_path for "
+            "unsynchronized crossings if timing closure is needed."
+        ) if cross_domains else (
+            "No CDC issues detected in timing reports. "
+            "If the design has multiple clocks, ensure SDC constraints "
+            "are defined and a timing analysis has been run."
+        ),
     })
 
 
@@ -4101,6 +4215,11 @@ def create_qsys_system(
     Platform Designer is the drag-and-drop system integration tool for
     connecting processors, peripherals, and custom IP via Avalon bus.
 
+    NOTE: This uses the legacy `set_interface_property ... EXPORT_OF` Tcl
+    pattern for clock/reset interface export. This is compatible with most
+    Qsys versions (13.0+). For Quartus 18.0+ Platform Designer, the newer
+    `set_interface_property ... EXPORTED_TO` approach may be preferred but
+    requires additional adapter configuration.
     Args:
         project_path: Project path
         system_name: Name for the .qsys system file
@@ -4173,7 +4292,7 @@ def add_qsys_component(
     if not Path(QSYS_SCRIPT).exists():
         return j({"error": f"qsys-script{_EXE_SUFFIX} not found"})
 
-    sys_path = Path(proj_dir) / system_file if not isabs(system_file) else Path(system_file)
+    sys_path = Path(proj_dir) / system_file if not os.path.isabs(system_file) else Path(system_file)
     if not sys_path.exists():
         return j({"error": f"System file not found: {sys_path}"})
 
@@ -4229,7 +4348,7 @@ def generate_qsys(
     if not Path(QSYS_GENERATE).exists():
         return j({"error": f"qsys-generate{_EXE_SUFFIX} not found"})
 
-    sys_path = Path(proj_dir) / system_file if not isabs(system_file) else Path(system_file)
+    sys_path = Path(proj_dir) / system_file if not os.path.isabs(system_file) else Path(system_file)
     if not sys_path.exists():
         return j({"error": f"System file not found: {sys_path}"})
 
@@ -4237,7 +4356,9 @@ def generate_qsys(
            f"--synthesis={synthesis}"]
     if simulation != "NONE":
         cmd.append(f"--simulation={simulation}")
-    cmd.append("--block-symbol-file")
+    major, minor = _parse_quartus_version()
+    if major >= 18:
+        cmd.append("--block-symbol-file")
 
     r = run_quartus(cmd, cwd=str(sys_path.parent), timeout=300)
     gen_dir = sys_path.parent / sys_path.stem / "synthesis"
@@ -4317,7 +4438,7 @@ def connect_qsys_components(
     except ValueError as e:
         return j({"error": str(e)})
 
-    sys_path = Path(proj_dir) / system_file if not isabs(system_file) else Path(system_file)
+    sys_path = Path(proj_dir) / system_file if not os.path.isabs(system_file) else Path(system_file)
     if not sys_path.exists():
         return j({"error": f"System file not found: {sys_path}"})
 
