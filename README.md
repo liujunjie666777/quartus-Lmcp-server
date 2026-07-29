@@ -25,7 +25,7 @@
 |---|---|---|
 | **安装与版本管理** | 3 | 查看安装信息、列出所有版本、运行时切换 Quartus 版本 |
 | **项目管理** | 6 | 创建/打开/查看/枚举/关闭/归档 Quartus 工程 |
-| **文件管理** | 4 | 添加/移除 HDL 文件、列��工程文件、读写 QSF |
+| **文件管理** | 4 | 添加/移除 HDL 文件、列出工程文件、读写 QSF |
 | **编译流程** | 6 | Analysis & Synthesis / Fitter / Assembler / 完整编译，状态与消息 |
 | **增量编译** | 4 | 增量编译开关、设计分区创建/查看、增量执行 |
 | **RTL 分析** | 2 | 模块层次/端口/FSM 解析、代码风格检查 |
@@ -41,7 +41,7 @@
 | **仿真集成** | 5 | Testbench 创建、仿真文件注册、ModelSim 批处理仿真、日志读取、产物列表 |
 | **报告与检查** | 5 | Flow Summary、资源利用率、指定报告读取、功耗分析、DRC |
 | **设计数据库** | 4 | 分区导入/导出、数据库导出、Back-annotate |
-| **Tcl 脚本** | 2 | Tcl 文件执��、内联 Tcl 命令 |
+| **Tcl 脚本** | 2 | Tcl 文件执行、内联 Tcl 命令 |
 | **设计空间探索** | 2 | DSE 探索、Seed Sweep |
 | **门级仿真** | 2 | 门级仿真生成、上下文获取 |
 | **工程维护** | 3 | 清理工程、IP 升级、Flow 模板生成 |
@@ -296,7 +296,7 @@ pip install -r requirements.txt
 | 工具 | 说明 |
 |---|---|
 | `list_available_ip` | 列举可用的 IP 核 |
-| `list_ip_catalog` | 列出 IP 目录详��内容 |
+| `list_ip_catalog` | 列出 IP 目录详细内容 |
 | `create_ip_core` | 通用 IP 核创建（MegaWizard） |
 | `create_pll_ip` | 创建 PLL IP（自动配置输入/输出频率） |
 | `create_ram_ip` | 创建片上 RAM IP |
