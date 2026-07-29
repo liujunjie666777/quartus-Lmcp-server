@@ -1,4 +1,0 @@
-interface:
-  display_name: "Quartus Timing Closure"
-  short_description: "Close timing with STA-guided Quartus loops"
-  default_prompt: "Use $quartus-timing-closure to inspect failed timing paths and propose fixes."

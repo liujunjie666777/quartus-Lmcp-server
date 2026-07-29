@@ -1,4 +1,0 @@
-interface:
-  display_name: "Quartus Project Bring-up"
-  short_description: "Create and sanity-check Quartus projects"
-  default_prompt: "Use $quartus-project-bringup to create and sanity-check a new Quartus project."

@@ -1,7 +1,4 @@
-MIPS_Project
-__pycache__
-.pytest_cache/
-.venv/
+__pycache__/
 *.pyc
 *.log
 *.rpt
@@ -16,3 +13,4 @@ incremental_db/
 output_files/
 simulation/
 test_projects/
+.workbuddy/

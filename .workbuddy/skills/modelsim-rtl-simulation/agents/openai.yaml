@@ -1,4 +1,0 @@
-interface:
-  display_name: "ModelSim RTL Simulation"
-  short_description: "Create and run ModelSim RTL simulations"
-  default_prompt: "Use $modelsim-rtl-simulation to build a testbench and run ModelSim."

@@ -42,6 +42,8 @@ log = logging.getLogger("quartus-Lmcp")
 # Configuration / Quartus discovery
 # ---------------------------------------------------------------------------
 
+_EXE_SUFFIX = ".exe"
+
 EXECUTABLE_NAMES = {
     "quartus_sh": "quartus_sh.exe",
     "quartus_map": "quartus_map.exe",
@@ -149,10 +151,62 @@ def _candidate_bin_dirs(root: Path) -> list[Path]:
     ]
 
 
-def discover_quartus() -> dict:
-    """Find the first usable Quartus command-line installation on this host."""
+def _build_install_info(bin_dir: Path, root: Path) -> dict:
+    """Build installation info dict from a discovered Quartus bin directory."""
+    quartus_sh = bin_dir / EXECUTABLE_NAMES["quartus_sh"]
+    quartus_root = bin_dir.parent
+    install_root = quartus_root.parent if quartus_root.name.lower() == "quartus" else root
+    tools = {
+        tool_name: str(bin_dir / exe_name)
+        for tool_name, exe_name in EXECUTABLE_NAMES.items()
+    }
+    # Extract version from the directory path (e.g. "18.1" from "E:/intelFPGA_lite/18.1/quartus/bin64")
+    path_ver = ""
+    for part in (install_root.name, quartus_root.name):
+        m = re.match(r"(\d+\.\d+)", part)
+        if m:
+            path_ver = m.group(1)
+            break
+    return {
+        "available": True,
+        "install_root": str(install_root),
+        "quartus_root": str(quartus_root),
+        "bin_dir": str(bin_dir),
+        "quartus_sh": str(quartus_sh),
+        "tools": tools,
+        "path_version": path_ver,
+    }
+
+
+def discover_all_quartus() -> list[dict]:
+    """Discover ALL Quartus installations on this host, sorted newest first."""
     seen: set[str] = set()
+    all_installs: list[dict] = []
+    for root in _candidate_roots():
+        for bin_dir in _candidate_bin_dirs(root):
+            key = str(bin_dir).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            quartus_sh = bin_dir / EXECUTABLE_NAMES["quartus_sh"]
+            if not quartus_sh.exists():
+                continue
+            all_installs.append(_build_install_info(bin_dir, root))
+    # Sort newest first by path version
+    all_installs.sort(key=lambda x: _version_key(Path(x["install_root"])), reverse=True)
+    return all_installs
+
+
+def discover_quartus() -> dict:
+    """Find the best (newest) usable Quartus command-line installation on this host."""
+    all_installs = discover_all_quartus()
+    if all_installs:
+        info = all_installs[0]
+        info["checked"] = [i["bin_dir"] for i in all_installs]
+        return info
+    # Compute checked list for error reporting
     checked: list[str] = []
+    seen: set[str] = set()
     for root in _candidate_roots():
         for bin_dir in _candidate_bin_dirs(root):
             key = str(bin_dir).lower()
@@ -160,26 +214,6 @@ def discover_quartus() -> dict:
                 continue
             seen.add(key)
             checked.append(str(bin_dir))
-            quartus_sh = bin_dir / EXECUTABLE_NAMES["quartus_sh"]
-            if not quartus_sh.exists():
-                continue
-
-            quartus_root = bin_dir.parent
-            install_root = quartus_root.parent if quartus_root.name.lower() == "quartus" else root
-            tools = {
-                tool_name: str(bin_dir / exe_name)
-                for tool_name, exe_name in EXECUTABLE_NAMES.items()
-            }
-            return {
-                "available": True,
-                "install_root": str(install_root),
-                "quartus_root": str(quartus_root),
-                "bin_dir": str(bin_dir),
-                "quartus_sh": str(quartus_sh),
-                "tools": tools,
-                "checked": checked,
-            }
-
     return {
         "available": False,
         "error": "No usable quartus_sh.exe was found. Set QUARTUS_MCP_ROOT, QUARTUS_ROOTDIR, or QUARTUS_BIN.",
@@ -255,26 +289,47 @@ def discover_modelsim() -> dict:
 QUARTUS = discover_quartus()
 MODELSIM = discover_modelsim()
 QUARTUS_BIN = QUARTUS.get("bin_dir", os.environ.get("QUARTUS_BIN", ""))
-QUARTUS_SH = QUARTUS.get("tools", {}).get("quartus_sh", str(Path(QUARTUS_BIN) / "quartus_sh.exe"))
-QUARTUS_MAP = QUARTUS.get("tools", {}).get("quartus_map", str(Path(QUARTUS_BIN) / "quartus_map.exe"))
-QUARTUS_FIT = QUARTUS.get("tools", {}).get("quartus_fit", str(Path(QUARTUS_BIN) / "quartus_fit.exe"))
-QUARTUS_ASM = QUARTUS.get("tools", {}).get("quartus_asm", str(Path(QUARTUS_BIN) / "quartus_asm.exe"))
-QUARTUS_STA = QUARTUS.get("tools", {}).get("quartus_sta", str(Path(QUARTUS_BIN) / "quartus_sta.exe"))
-QUARTUS_PGM = QUARTUS.get("tools", {}).get("quartus_pgm", str(Path(QUARTUS_BIN) / "quartus_pgm.exe"))
-QUARTUS_POW = QUARTUS.get("tools", {}).get("quartus_pow", str(Path(QUARTUS_BIN) / "quartus_pow.exe"))
-QUARTUS_DRC = QUARTUS.get("tools", {}).get("quartus_drc", str(Path(QUARTUS_BIN) / "quartus_drc.exe"))
-QUARTUS_STP = QUARTUS.get("tools", {}).get("quartus_stp", str(Path(QUARTUS_BIN) / "quartus_stp.exe"))
-QUARTUS_CPF = QUARTUS.get("tools", {}).get("quartus_cpf", str(Path(QUARTUS_BIN) / "quartus_cpf.exe"))
-QUARTUS_DSE = QUARTUS.get("tools", {}).get("quartus_dse", str(Path(QUARTUS_BIN) / "quartus_dse.exe"))
-QUARTUS_EDA = QUARTUS.get("tools", {}).get("quartus_eda", str(Path(QUARTUS_BIN) / "quartus_eda.exe"))
-QUARTUS_JLI = QUARTUS.get("tools", {}).get("quartus_jli", str(Path(QUARTUS_BIN) / "quartus_jli.exe"))
-QUARTUS_CVP = QUARTUS.get("tools", {}).get("quartus_cvp", str(Path(QUARTUS_BIN) / "quartus_cvp.exe"))
-QUARTUS_CDB = QUARTUS.get("tools", {}).get("quartus_cdb", str(Path(QUARTUS_BIN) / "quartus_cdb.exe"))
+QUARTUS_SH = QUARTUS.get("tools", {}).get("quartus_sh", str(Path(QUARTUS_BIN) / f"quartus_sh{_EXE_SUFFIX}"))
+QUARTUS_MAP = QUARTUS.get("tools", {}).get("quartus_map", str(Path(QUARTUS_BIN) / f"quartus_map{_EXE_SUFFIX}"))
+QUARTUS_FIT = QUARTUS.get("tools", {}).get("quartus_fit", str(Path(QUARTUS_BIN) / f"quartus_fit{_EXE_SUFFIX}"))
+QUARTUS_ASM = QUARTUS.get("tools", {}).get("quartus_asm", str(Path(QUARTUS_BIN) / f"quartus_asm{_EXE_SUFFIX}"))
+QUARTUS_STA = QUARTUS.get("tools", {}).get("quartus_sta", str(Path(QUARTUS_BIN) / f"quartus_sta{_EXE_SUFFIX}"))
+QUARTUS_PGM = QUARTUS.get("tools", {}).get("quartus_pgm", str(Path(QUARTUS_BIN) / f"quartus_pgm{_EXE_SUFFIX}"))
+QUARTUS_POW = QUARTUS.get("tools", {}).get("quartus_pow", str(Path(QUARTUS_BIN) / f"quartus_pow{_EXE_SUFFIX}"))
+QUARTUS_DRC = QUARTUS.get("tools", {}).get("quartus_drc", str(Path(QUARTUS_BIN) / f"quartus_drc{_EXE_SUFFIX}"))
+QUARTUS_STP = QUARTUS.get("tools", {}).get("quartus_stp", str(Path(QUARTUS_BIN) / f"quartus_stp{_EXE_SUFFIX}"))
+QUARTUS_CPF = QUARTUS.get("tools", {}).get("quartus_cpf", str(Path(QUARTUS_BIN) / f"quartus_cpf{_EXE_SUFFIX}"))
+QUARTUS_DSE = QUARTUS.get("tools", {}).get("quartus_dse", str(Path(QUARTUS_BIN) / f"quartus_dse{_EXE_SUFFIX}"))
+QUARTUS_EDA = QUARTUS.get("tools", {}).get("quartus_eda", str(Path(QUARTUS_BIN) / f"quartus_eda{_EXE_SUFFIX}"))
+QUARTUS_JLI = QUARTUS.get("tools", {}).get("quartus_jli", str(Path(QUARTUS_BIN) / f"quartus_jli{_EXE_SUFFIX}"))
+QUARTUS_CVP = QUARTUS.get("tools", {}).get("quartus_cvp", str(Path(QUARTUS_BIN) / f"quartus_cvp{_EXE_SUFFIX}"))
+QUARTUS_CDB = QUARTUS.get("tools", {}).get("quartus_cdb", str(Path(QUARTUS_BIN) / f"quartus_cdb{_EXE_SUFFIX}"))
 
-# Qsys / Platform Designer (inside quartus directory)
-_qsys_bin = str(Path(QUARTUS_BIN).parent / "sopc_builder" / "bin")
-QSYS_SCRIPT = str(Path(_qsys_bin) / "qsys-script.exe")
-QSYS_GENERATE = str(Path(_qsys_bin) / "qsys-generate.exe")
+# Qsys / Platform Designer — try multiple path patterns across Quartus versions
+def _find_qsys_tools(quartus_bin: str) -> tuple[str, str]:
+    """Return (qsys_script, qsys_generate) paths, trying multiple layouts."""
+    bin_path = Path(quartus_bin)
+    quartus_root = bin_path.parent  # e.g. .../quartus or .../18.1/quartus
+    install_root = quartus_root.parent if quartus_root.name.lower() == "quartus" else quartus_root
+
+    candidate_dirs = [
+        quartus_root / "sopc_builder" / "bin",
+        install_root / "quartus" / "sopc_builder" / "bin",
+        bin_path,                                         # 20.x+ may put qsys tools in main bin
+        install_root / "quartus" / "bin",
+        install_root / "bin",
+    ]
+    script_name = f"qsys-script{_EXE_SUFFIX}"
+    generate_name = f"qsys-generate{_EXE_SUFFIX}"
+    for d in candidate_dirs:
+        s = d / script_name
+        g = d / generate_name
+        if s.exists() or g.exists():
+            return str(s), str(g)
+    # Fallback: first candidate (preserves old behavior)
+    return str(candidate_dirs[0] / script_name), str(candidate_dirs[0] / generate_name)
+
+QSYS_SCRIPT, QSYS_GENERATE = _find_qsys_tools(QUARTUS_BIN)
 
 SIM_VLIB = MODELSIM.get("tools", {}).get("vlib", "")
 SIM_VMAP = MODELSIM.get("tools", {}).get("vmap", "")
@@ -786,7 +841,7 @@ def _run_ip_setup_scripts(proj_dir: str, sim_dir: Path, log_parts: list[str]) ->
 
 
 def _generate_eda_simulation_files(proj_dir: str, revision: str, log_parts: list[str]) -> bool:
-    quartus_eda = str(Path(QUARTUS_BIN) / "quartus_eda.exe")
+    quartus_eda = str(Path(QUARTUS_BIN) / f"quartus_eda{_EXE_SUFFIX}")
     r = run_quartus(
         [quartus_eda, "--simulation", "--tool=questasim", "--format=verilog", revision],
         cwd=proj_dir,
@@ -815,14 +870,48 @@ def _flow_report_successful(text: str) -> bool:
     )
 
 
+_QUARTUS_VERSION_STR: Optional[str] = None
+_QUARTUS_VERSION_TUPLE: Optional[tuple[int, int]] = None
+
+
 def _quartus_version() -> str:
+    """Cache and return the Quartus version string (e.g. 'Version 18.1.0 Build 625')."""
+    global _QUARTUS_VERSION_STR
+    if _QUARTUS_VERSION_STR is not None:
+        return _QUARTUS_VERSION_STR
     if not Path(QUARTUS_SH).exists():
+        _QUARTUS_VERSION_STR = ""
         return ""
     r = run_quartus([QUARTUS_SH, "--version"], timeout=30)
     for line in (r["stdout"] + "\n" + r["stderr"]).splitlines():
         if line.strip().startswith("Version "):
-            return line.strip()
-    return (r["stdout"] or r["stderr"]).strip().splitlines()[0] if (r["stdout"] or r["stderr"]).strip() else ""
+            _QUARTUS_VERSION_STR = line.strip()
+            return _QUARTUS_VERSION_STR
+    _QUARTUS_VERSION_STR = (r["stdout"] or r["stderr"]).strip().splitlines()[0] if (r["stdout"] or r["stderr"]).strip() else ""
+    return _QUARTUS_VERSION_STR
+
+
+def _parse_quartus_version() -> tuple[int, int]:
+    """Return (major, minor) tuple for the detected Quartus version. (0, 0) if unknown."""
+    global _QUARTUS_VERSION_TUPLE
+    if _QUARTUS_VERSION_TUPLE is not None:
+        return _QUARTUS_VERSION_TUPLE
+    ver_str = _quartus_version()
+    # Match patterns like "Version 18.1.0 Build 625" or "Quartus II 64-Bit Version 13.0.1"
+    m = re.search(r"Version\s+(\d+)\.(\d+)", ver_str)
+    if m:
+        _QUARTUS_VERSION_TUPLE = (int(m.group(1)), int(m.group(2)))
+    else:
+        _QUARTUS_VERSION_TUPLE = (0, 0)
+    return _QUARTUS_VERSION_TUPLE
+
+
+def _ip_version_string() -> str:
+    """Return the Quartus version as an IP version string (e.g. '18.1') for Qsys add_instance."""
+    major, minor = _parse_quartus_version()
+    if major > 0:
+        return f"{major}.{minor}"
+    return "18.1"  # sensible default for unknown versions
 
 
 @mcp.tool()
@@ -855,7 +944,131 @@ def get_quartus_installation() -> str:
         "default_project_dir": DEFAULT_PROJECT_DIR,
         "checked": QUARTUS.get("checked", []),
         "error": QUARTUS.get("error", ""),
+        "all_installations_count": len(_ALL_INSTALLATIONS) if "_ALL_INSTALLATIONS" in dir() else 0,
+        "current_install_index": _CURRENT_INSTALL_INDEX if "_CURRENT_INSTALL_INDEX" in dir() else 0,
     })
+
+
+# ---------------------------------------------------------------------------
+# Multi-version runtime switching
+# ---------------------------------------------------------------------------
+
+_ALL_INSTALLATIONS: list[dict] = []
+_CURRENT_INSTALL_INDEX: int = 0
+
+
+def _apply_installation(index: int) -> dict:
+    """Apply an installation at the given index, regenerating all globals."""
+    global QUARTUS, MODELSIM, QUARTUS_BIN, QUARTUS_SH, QUARTUS_MAP, QUARTUS_FIT
+    global QUARTUS_ASM, QUARTUS_STA, QUARTUS_PGM, QUARTUS_POW, QUARTUS_DRC, QUARTUS_STP
+    global QUARTUS_CPF, QUARTUS_DSE, QUARTUS_EDA, QUARTUS_JLI, QUARTUS_CVP, QUARTUS_CDB
+    global SIM_VLIB, SIM_VMAP, SIM_VLOG, SIM_VCOM, SIM_VSIM
+    global QSYS_SCRIPT, QSYS_GENERATE, QUARTUS_ENV
+    global _QUARTUS_VERSION_STR, _QUARTUS_VERSION_TUPLE, _CURRENT_INSTALL_INDEX
+
+    if not _ALL_INSTALLATIONS:
+        return {"success": False, "error": "No installations discovered"}
+    if index < 0 or index >= len(_ALL_INSTALLATIONS):
+        return {"success": False, "error": f"Invalid index {index}, valid range: 0-{len(_ALL_INSTALLATIONS)-1}"}
+
+    install = _ALL_INSTALLATIONS[index]
+    QUARTUS = install
+    QUARTUS_BIN = install.get("bin_dir", os.environ.get("QUARTUS_BIN", ""))
+    QUARTUS_SH = install.get("tools", {}).get("quartus_sh", str(Path(QUARTUS_BIN) / "quartus_sh.exe"))
+    QUARTUS_MAP = install.get("tools", {}).get("quartus_map", str(Path(QUARTUS_BIN) / "quartus_map.exe"))
+    QUARTUS_FIT = install.get("tools", {}).get("quartus_fit", str(Path(QUARTUS_BIN) / "quartus_fit.exe"))
+    QUARTUS_ASM = install.get("tools", {}).get("quartus_asm", str(Path(QUARTUS_BIN) / "quartus_asm.exe"))
+    QUARTUS_STA = install.get("tools", {}).get("quartus_sta", str(Path(QUARTUS_BIN) / "quartus_sta.exe"))
+    QUARTUS_PGM = install.get("tools", {}).get("quartus_pgm", str(Path(QUARTUS_BIN) / "quartus_pgm.exe"))
+    QUARTUS_POW = install.get("tools", {}).get("quartus_pow", str(Path(QUARTUS_BIN) / "quartus_pow.exe"))
+    QUARTUS_DRC = install.get("tools", {}).get("quartus_drc", str(Path(QUARTUS_BIN) / "quartus_drc.exe"))
+    QUARTUS_STP = install.get("tools", {}).get("quartus_stp", str(Path(QUARTUS_BIN) / "quartus_stp.exe"))
+    QUARTUS_CPF = install.get("tools", {}).get("quartus_cpf", str(Path(QUARTUS_BIN) / "quartus_cpf.exe"))
+    QUARTUS_DSE = install.get("tools", {}).get("quartus_dse", str(Path(QUARTUS_BIN) / "quartus_dse.exe"))
+    QUARTUS_EDA = install.get("tools", {}).get("quartus_eda", str(Path(QUARTUS_BIN) / "quartus_eda.exe"))
+    QUARTUS_JLI = install.get("tools", {}).get("quartus_jli", str(Path(QUARTUS_BIN) / "quartus_jli.exe"))
+    QUARTUS_CVP = install.get("tools", {}).get("quartus_cvp", str(Path(QUARTUS_BIN) / "quartus_cvp.exe"))
+    QUARTUS_CDB = install.get("tools", {}).get("quartus_cdb", str(Path(QUARTUS_BIN) / "quartus_cdb.exe"))
+
+    # Re-discover ModelSim (might differ per Quartus version)
+    MODELSIM = discover_modelsim()
+    SIM_VLIB = MODELSIM.get("tools", {}).get("vlib", "")
+    SIM_VMAP = MODELSIM.get("tools", {}).get("vmap", "")
+    SIM_VLOG = MODELSIM.get("tools", {}).get("vlog", "")
+    SIM_VCOM = MODELSIM.get("tools", {}).get("vcom", "")
+    SIM_VSIM = MODELSIM.get("tools", {}).get("vsim", "")
+
+    # Re-discover Qsys tools for this version
+    QSYS_SCRIPT, QSYS_GENERATE = _find_qsys_tools(QUARTUS_BIN)
+
+    # Rebuild environment
+    QUARTUS_ENV = {**os.environ}
+    if install.get("quartus_root"):
+        QUARTUS_ENV["QUARTUS_ROOTDIR"] = str(install["quartus_root"])
+        QUARTUS_ENV["QUARTUS_ROOTDIR_OVERRIDE"] = str(install["quartus_root"])
+    if QUARTUS_BIN:
+        QUARTUS_ENV["PATH"] = str(QUARTUS_BIN) + os.pathsep + QUARTUS_ENV.get("PATH", "")
+    if MODELSIM.get("bin_dir"):
+        QUARTUS_ENV["PATH"] = str(MODELSIM["bin_dir"]) + os.pathsep + QUARTUS_ENV.get("PATH", "")
+
+    # Clear version cache so it's re-detected
+    _QUARTUS_VERSION_STR = None
+    _QUARTUS_VERSION_TUPLE = None
+    _CURRENT_INSTALL_INDEX = index
+
+    log.info("Switched to Quartus installation [%d]: %s", index, install.get("bin_dir"))
+    return {"success": True, "index": index, "bin_dir": QUARTUS_BIN}
+
+
+@mcp.tool()
+def list_quartus_installations() -> str:
+    """List all discovered Quartus installations on this machine.
+
+    Returns each installation with its index, path, and quick version info.
+    Use the index with switch_quartus_installation to select a different version.
+    """
+    global _ALL_INSTALLATIONS
+    _ALL_INSTALLATIONS = discover_all_quartus()
+    if not _ALL_INSTALLATIONS:
+        return j({"error": "No Quartus installations found", "count": 0})
+
+    installs = []
+    for i, inst in enumerate(_ALL_INSTALLATIONS):
+        installs.append({
+            "index": i,
+            "active": (i == _CURRENT_INSTALL_INDEX),
+            "bin_dir": inst["bin_dir"],
+            "install_root": inst["install_root"],
+            "quartus_root": inst["quartus_root"],
+            "path_version": inst.get("path_version", "?"),
+        })
+    return j({"count": len(installs), "current_index": _CURRENT_INSTALL_INDEX, "installations": installs})
+
+
+@mcp.tool()
+def switch_quartus_installation(index: int) -> str:
+    """Switch to a different Quartus version by index.
+
+    First call list_quartus_installations to see available versions and their
+    indices, then pass the desired index here. All subsequent compilation,
+    analysis, and programming commands will use the newly selected version.
+
+    Args:
+        index: Installation index from list_quartus_installations
+    """
+    global _ALL_INSTALLATIONS
+    if not _ALL_INSTALLATIONS:
+        _ALL_INSTALLATIONS = discover_all_quartus()
+    result = _apply_installation(index)
+    if result["success"]:
+        return j({
+            "success": True,
+            "switched_to": index,
+            "bin_dir": QUARTUS_BIN,
+            "version": _quartus_version(),
+            "all_versions": [i.get("path_version", "?") for i in _ALL_INSTALLATIONS],
+        })
+    return j(result)
 
 
 # ---------------------------------------------------------------------------
@@ -2133,7 +2346,7 @@ def set_false_path_constraint(
 @mcp.tool()
 def detect_jtag_devices() -> str:
     """Detect JTAG-connected devices using jtagconfig or quartus_pgm."""
-    jtagconfig = str(Path(QUARTUS_BIN) / "jtagconfig.exe")
+    jtagconfig = str(Path(QUARTUS_BIN) / f"jtagconfig{_EXE_SUFFIX}")
     if Path(jtagconfig).exists():
         r = run_quartus([jtagconfig], timeout=30)
     else:
@@ -3899,10 +4112,11 @@ def create_qsys_system(
     except ValueError as e:
         return j({"error": str(e)})
     if not Path(QSYS_SCRIPT).exists():
-        return j({"error": "qsys-script.exe not found"})
+        return j({"error": f"qsys-script{_EXE_SUFFIX} not found"})
 
     family = device_family or _detect_device_family(proj_dir, revision)
     system_path = Path(proj_dir) / f"{system_name}.qsys"
+    ip_ver = _ip_version_string()
 
     tcl = textwrap.dedent(f"""\
         package require qsys
@@ -3911,7 +4125,7 @@ def create_qsys_system(
         set_project_property DEVICE {_detect_device_part(proj_dir, revision)}
 
         # Create default clock source
-        add_instance clk_0 clock_source 18.1
+        add_instance clk_0 clock_source {ip_ver}
         set_instance_parameter_value clk_0 clockFrequency {{50000000}}
         set_instance_parameter_value clk_0 clockFrequencyKnown {{1}}
         set_instance_parameter_value clk_0 resetSynchronousEdges {{none}}
@@ -3957,7 +4171,7 @@ def add_qsys_component(
     except ValueError as e:
         return j({"error": str(e)})
     if not Path(QSYS_SCRIPT).exists():
-        return j({"error": "qsys-script.exe not found"})
+        return j({"error": f"qsys-script{_EXE_SUFFIX} not found"})
 
     sys_path = Path(proj_dir) / system_file if not isabs(system_file) else Path(system_file)
     if not sys_path.exists():
@@ -3972,11 +4186,12 @@ def add_qsys_component(
                     f'set_instance_parameter_value {instance_name} {k.strip()} {{{v.strip()}}}')
 
     param_block = "\n".join(param_lines)
+    ip_ver = _ip_version_string()
 
     tcl = textwrap.dedent(f"""\
         package require qsys
         load_system {{{str(sys_path)}}}
-        add_instance {instance_name} {component_type} 18.1
+        add_instance {instance_name} {component_type} {ip_ver}
         {param_block}
         save_system {{{str(sys_path)}}}
         """)
@@ -4012,7 +4227,7 @@ def generate_qsys(
     except ValueError as e:
         return j({"error": str(e)})
     if not Path(QSYS_GENERATE).exists():
-        return j({"error": "qsys-generate.exe not found"})
+        return j({"error": f"qsys-generate{_EXE_SUFFIX} not found"})
 
     sys_path = Path(proj_dir) / system_file if not isabs(system_file) else Path(system_file)
     if not sys_path.exists():
@@ -4152,7 +4367,7 @@ def compile_nios2_bsp(
     if not sopcinfo_files:
         return j({"error": f"No .sopcinfo found in {Path(bsp_dir).parent} or subdirectories"})
 
-    bsp_exe = Path(nios2_eds) / "sdk2" / "bin" / "nios2-bsp-create-settings.exe"
+    bsp_exe = Path(nios2_eds) / "sdk2" / "bin" / f"nios2-bsp-create-settings{_EXE_SUFFIX}"
     if not bsp_exe.exists():
         # Try alternative
         bsp_exe = Path(nios2_eds) / "bin" / "nios2-bsp"
@@ -4206,9 +4421,9 @@ def convert_nios2_files(
 
     bin_dir = Path(nios2_eds) / "bin"
     tools = {
-        "hex": str(bin_dir / "elf2hex.exe") if (bin_dir / "elf2hex.exe").exists() else None,
-        "flash": str(bin_dir / "elf2flash.exe") if (bin_dir / "elf2flash.exe").exists() else None,
-        "sof2flash": str(bin_dir / "sof2flash.exe") if (bin_dir / "sof2flash.exe").exists() else None,
+        "hex": str(bin_dir / f"elf2hex{_EXE_SUFFIX}") if (bin_dir / f"elf2hex{_EXE_SUFFIX}").exists() else None,
+        "flash": str(bin_dir / f"elf2flash{_EXE_SUFFIX}") if (bin_dir / f"elf2flash{_EXE_SUFFIX}").exists() else None,
+        "sof2flash": str(bin_dir / f"sof2flash{_EXE_SUFFIX}") if (bin_dir / f"sof2flash{_EXE_SUFFIX}").exists() else None,
     }
 
     if output_type == "hex":
@@ -4579,17 +4794,19 @@ def _detect_device_part(proj_dir, revision):
 
 
 def _discover_nios2_eds():
-    """Auto-discover Nios II EDS installation."""
+    """Auto-discover Nios II EDS installation, preferring the version matching Quartus."""
+    major, minor = _parse_quartus_version()
+    ver_str = f"{major}.{minor}" if major > 0 else ""
+
     for drive in ("E:/", "C:/", "D:/", "F:/"):
         for pattern in [f"{drive}intelFPGA_lite/*/nios2eds",
                         f"{drive}intelFPGA/*/nios2eds"]:
             matches = glob.glob(pattern)
             if matches:
-                # Prefer the version matching Quartus
-                bin_dir = QUARTUS_BIN.replace("\\", "/")
-                for m in sorted(matches, reverse=True):
-                    if any(v in bin_dir for v in ["18.1", "18.0"]):
-                        if "18.1" in m or "18.0" in m:
+                # Prefer the version matching the active Quartus version
+                if ver_str:
+                    for m in sorted(matches, reverse=True):
+                        if ver_str in m:
                             return m
                 return sorted(matches, reverse=True)[0]
     return None

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Quartus MCP Maintainer"
-  short_description: "Keep MCP tools, README, tests, and skills in sync"
-  default_prompt: "Use $quartus-mcp-maintainer to audit MCP tool inventory drift and update docs/tests."
