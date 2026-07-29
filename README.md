@@ -409,9 +409,11 @@ pip install -r requirements.txt
 
 ---
 
-## 致谢 / Acknowledgements
+## 重庆邮电大学 / CQUPT
 
-基于 [irumvag/quartus_mcp_server](https://github.com/irumvag/quartus_mcp_server)（MIT）扩展。
+重庆邮电大学 FPGA 与嵌入式系统实验室。
+
+Laboratory of FPGA & Embedded Systems, Chongqing University of Posts and Telecommunications.
 
 ---
 
