@@ -409,11 +409,7 @@ pip install -r requirements.txt
 
 ---
 
-## 重庆邮电大学 / CQUPT
-
-重庆邮电大学 FPGA 与嵌入式系统实验室。
-
-Laboratory of FPGA & Embedded Systems, Chongqing University of Posts and Telecommunications.
+## CQUPT
 
 ---
 
