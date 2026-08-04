@@ -51,7 +51,7 @@
 ## 安装 / Installation
 
 ```bash
-git clone https://github.com/liujunjie666777/quartus-Lmcp-server.git
+git clone https://github.com/L-YvY-L/quartus-Lmcp-server.git
 cd quartus-Lmcp-server
 pip install -r requirements.txt
 ```
